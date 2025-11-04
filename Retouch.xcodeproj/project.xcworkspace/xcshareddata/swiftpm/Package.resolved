@@ -1,0 +1,24 @@
+{
+  "originHash" : "7bd53f8688bf47e38ca2a2822c57feeb1fde6e0c7fa39276547f458669a36655",
+  "pins" : [
+    {
+      "identity" : "generative-ai-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/google/generative-ai-swift",
+      "state" : {
+        "revision" : "44b8ce120425f9cf53ca756f3434ca2c2696f8bd",
+        "version" : "0.5.6"
+      }
+    },
+    {
+      "identity" : "mantis",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/guoyingtao/Mantis.git",
+      "state" : {
+        "revision" : "d6880eb97267248f89e6cef2dd52785d50627639",
+        "version" : "1.9.0"
+      }
+    }
+  ],
+  "version" : 3
+}
