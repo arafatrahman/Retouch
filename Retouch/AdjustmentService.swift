@@ -68,12 +68,10 @@ class AdjustmentService {
         var currentImage = ciImage
         
         // --- 1. Color Controls (Saturation, Contrast, Brightness) ---
-        // This filter does 3-in-1
         if let filter = CIFilter(name: "CIColorControls") {
             filter.setValue(currentImage, forKey: kCIInputImageKey)
             filter.setValue(values.saturation, forKey: kCIInputSaturationKey)
             filter.setValue(values.contrast, forKey: kCIInputContrastKey)
-            // Note: We use Exposure, not Brightness.
             if let output = filter.outputImage {
                 currentImage = output
             }
@@ -110,8 +108,7 @@ class AdjustmentService {
         // --- 5. Temperature & Tint ---
         if let filter = CIFilter(name: "CITemperatureAndTint") {
             filter.setValue(currentImage, forKey: kCIInputImageKey)
-            // Map our -1...1 slider to a realistic Kelvin/Tint range
-            let neutral = CIVector(x: 6500, y: 0) // Neutral temp (6500K)
+            let neutral = CIVector(x: 6500, y: 0)
             let tempVector = CIVector(x: 6500 + (values.temperature * 1500), y: values.tint * 150)
             filter.setValue(neutral, forKey: "inputNeutral")
             filter.setValue(tempVector, forKey: "inputTargetNeutral")
@@ -133,7 +130,7 @@ class AdjustmentService {
         if let filter = CIFilter(name: "CIVignette") {
             filter.setValue(currentImage, forKey: kCIInputImageKey)
             filter.setValue(values.vignette, forKey: kCIInputIntensityKey)
-            filter.setValue(values.vignette * 15, forKey: kCIInputRadiusKey) // Make radius grow with intensity
+            filter.setValue(values.vignette * 15, forKey: kCIInputRadiusKey)
             if let output = filter.outputImage {
                 currentImage = output
             }
@@ -144,8 +141,7 @@ class AdjustmentService {
             return image
         }
         
-        // --- THIS IS THE FIX ---
         return UIImage(cgImage: outputCGImage, scale: image.scale, orientation: image.imageOrientation)
-        // --- END OF FIX ---
     }
 }
+// <-- Make sure there is NO other code or class definition after this line -->

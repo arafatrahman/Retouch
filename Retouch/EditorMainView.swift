@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Enum to manage which tool is currently active
+// --- 1. ADD 'removeBG' TO THE ENUM ---
 enum EditorTool: String, CaseIterable {
     case filters = "Filters"
     case adjustments = "Adjustments"
@@ -8,6 +8,7 @@ enum EditorTool: String, CaseIterable {
     case objects = "Objects"
     case text = "Text"
     case crop = "Crop"
+    case removeBG = "Remove BG" // <-- NEW
     
     var iconName: String {
         switch self {
@@ -17,6 +18,7 @@ enum EditorTool: String, CaseIterable {
         case .objects: return "wand.and.rays"
         case .text: return "textformat"
         case .crop: return "crop.rotate"
+        case .removeBG: return "scissors" // <-- NEW
         }
     }
 }
@@ -57,6 +59,10 @@ struct EditorMainView: View {
     // State for "Compare" button
     @State private var isComparing = false
     
+    // --- 2. ADD AI LOADING STATE & SERVICE ---
+    @State private var isProcessingAI = false // <-- NEW
+    private let aiService = GeminiAIService() // <-- NEW (This line will no longer error)
+    
     @Environment(\.presentationMode) var presentationMode
 
     // Initialize state with the passed-in image
@@ -76,12 +82,10 @@ struct EditorMainView: View {
                     .onChange(of: selectedTool) { [oldTool = selectedTool] newTool in // Capture old value
                         
                         // --- RENDER LOGIC for Text Tool ---
-                        // If we are CLOSING the text tool, render the overlays
                         if oldTool == .text && newTool != .text && !overlayItems.isEmpty {
                             let imageToRenderOn = editedImage
                             let itemsToRender = overlayItems
                             
-                            // Clear items immediately for UI responsiveness
                             self.overlayItems.removeAll()
                             self.selectedItemID = nil
                             
@@ -91,24 +95,43 @@ struct EditorMainView: View {
                                     onto: imageToRenderOn
                                 )
                                 await MainActor.run {
-                                    // Set the newly rendered image
                                     self.editedImage = finalImage
                                 }
                             }
                         }
                         // --- END RENDER LOGIC ---
 
-                        // Set the base image for the new tool (if it's not the text tool)
-                        if newTool != nil && newTool != .text {
+                        // Set the base image for the new tool
+                        if newTool != nil && newTool != .text && newTool != .removeBG {
                             imageBaseForTool = editedImage
                         }
                         
-                        // If the crop tool is selected, present the full-screen cover
+                        // If the crop tool is selected
                         if newTool == .crop {
                             isShowingCropView = true
-                            // Deselect the tool so the bottom panel closes
                             selectedTool = nil
                         }
+                        
+                        // --- 3. HANDLE NEW 'REMOVE BG' TOOL ---
+                        if newTool == .removeBG {
+                            isProcessingAI = true // Show global spinner
+                            let imageToProcess = editedImage
+                            
+                            Task {
+                                let result = await aiService.removeBackground(image: imageToProcess)
+                                await MainActor.run {
+                                    switch result {
+                                    case .success(let newImage):
+                                        self.editedImage = newImage
+                                    case .failure(let error):
+                                        print("Error removing background: \(error)")
+                                    }
+                                    self.isProcessingAI = false
+                                    self.selectedTool = nil // It's a one-shot tool
+                                }
+                            }
+                        }
+                        // --- END OF NEW LOGIC ---
                     }
                 
                 // 2. MAIN IMAGE PREVIEW
@@ -124,14 +147,26 @@ struct EditorMainView: View {
                         .background(Color(UIColor.secondarySystemBackground))
                 }
             }
+            
+            // --- 4. ADD AI LOADING SPINNER OVERLAY ---
+            if isProcessingAI {
+                VStack(spacing: 15) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    Text("AI is thinking...")
+                        .foregroundColor(.white)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black.opacity(0.6))
+                .ignoresSafeArea()
+            }
+            // --- END OF OVERLAY ---
         }
-        .navigationBarHidden(true) // We use our custom toolbar
+        .navigationBarHidden(true)
         .preferredColorScheme(.dark)
         // This modifier presents the Crop/Rotate tool
         .fullScreenCover(isPresented: $isShowingCropView) {
-            // --- THIS IS THE CHANGE: Using our native view ---
             NativeTransformView(image: imageBaseForTool) { croppedImage in
-                // This is the callback when cropping is done
                 if let croppedImage = croppedImage {
                     self.editedImage = croppedImage
                 }
@@ -141,10 +176,10 @@ struct EditorMainView: View {
         // This modifier presents the Export tool
         .sheet(isPresented: $isShowingExportView) {
             ExportView(imageToExport: editedImage) {
-                // This is the callback after exporting is done
                 isShowingExportView = false
             }
         }
+        .disabled(isProcessingAI) // <-- 5. Disable all controls while AI is working
     }
     
     // MARK: - View Components
@@ -160,7 +195,7 @@ struct EditorMainView: View {
             
             Spacer()
             
-            // "Compare" Button (Hold to see original)
+            // "Compare" Button
             Image(systemName: "arrow.triangle.2.circlepath")
                 .font(.title2)
                 .foregroundColor(.white)
@@ -174,11 +209,9 @@ struct EditorMainView: View {
             
             // "Done" (Export) Button
             Button("Done") {
-                // Ensure no tool is active (which renders text)
                 if selectedTool == .text {
                     selectedTool = nil
                 }
-                // Show the export screen
                 isShowingExportView = true
             }
             .font(.headline.weight(.bold))
@@ -191,7 +224,6 @@ struct EditorMainView: View {
     /// 2. The Zoomable/Pannable Image Preview
     var imagePreview: some View {
         GeometryReader { proxy in
-            // This ZStack layers the image and the overlays
             ZStack {
                 // --- The Image ---
                 Image(uiImage: isComparing ? originalImage : editedImage)
@@ -199,22 +231,19 @@ struct EditorMainView: View {
                     .scaledToFit()
                     .scaleEffect(scale)
                     .offset(offset)
-                    .if(!isDrawing && selectedTool != .text) { view in // Disable pan/zoom for draw AND text
+                    .if(!isDrawing && selectedTool != .text) { view in
                         view.gesture(
-                            // Combined gesture for pan and zoom
                             SimultaneousGesture(
-                                // Zoom gesture
                                 MagnificationGesture()
                                     .onChanged { value in
                                         let delta = value / lastScale
                                         lastScale = value
-                                        scale = min(max(scale * delta, 1.0), 5.0) // Limit zoom
+                                        scale = min(max(scale * delta, 1.0), 5.0)
                                     }
                                     .onEnded { _ in
                                         lastScale = 1.0
                                     },
                                 
-                                // Pan gesture
                                 DragGesture()
                                     .onChanged { value in
                                         offset = CGSize(
@@ -231,26 +260,25 @@ struct EditorMainView: View {
                     .frame(width: proxy.size.width, height: proxy.size.height)
                 
                 // --- The Overlay Canvas ---
-                // This is visible only when the text tool is active
                 if selectedTool == .text {
                     OverlaysCanvasView(
                         items: $overlayItems,
                         selectedItemID: $selectedItemID,
                         imageSize: editedImage.size,
-                        viewProxy: proxy // Pass the proxy for coordinate mapping
+                        viewProxy: proxy
                     )
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
-        .clipped() // Don't let image go outside its bounds
+        .clipped()
     }
     
     /// 3. The Panel that shows the correct tool options
     @ViewBuilder
     var subToolPanel: some View {
         VStack {
-            // Header for the panel (e.g., "Filters", "Adjustments")
+            // Header for the panel
             HStack {
                 Text(selectedTool?.rawValue ?? "Tool")
                     .font(.headline)
@@ -258,7 +286,7 @@ struct EditorMainView: View {
                 
                 Spacer()
                 
-                // "Close" button for the panel
+                // "Close" button
                 Button {
                     withAnimation {
                         selectedTool = nil
@@ -281,43 +309,39 @@ struct EditorMainView: View {
                     originalImage: imageBaseForTool,
                     editedImage: $editedImage
                 )
-                
             case .adjustments:
                 AdjustmentsPanel(
                     originalImage: imageBaseForTool,
                     editedImage: $editedImage
                 )
-                
             case .retouch:
                 RetouchPanel(
                     originalImage: imageBaseForTool,
                     editedImage: $editedImage
                 )
-                
             case .objects:
                 ObjectRemovalPanel(
                     originalImage: imageBaseForTool,
                     editedImage: $editedImage,
-                    isDrawing: $isDrawing // Pass the binding
+                    isDrawing: $isDrawing
                 )
-                
             case .text:
                 TextStickersPanel(
                     items: $overlayItems,
                     selectedItemID: $selectedItemID
                 )
-                
             case .crop:
                 EmptyView() // Handled by fullScreenCover
-                
+            case .removeBG:
+                EmptyView() // Handled by onChange modifier
             case .none:
                 EmptyView()
             }
             
             Spacer()
         }
-        .frame(height: 250) // Give the panel a fixed height
-        .transition(.move(edge: .bottom)) // Animate in from bottom
+        .frame(height: 250)
+        .transition(.move(edge: .bottom))
     }
 }
 

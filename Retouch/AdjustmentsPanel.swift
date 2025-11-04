@@ -7,8 +7,11 @@ struct AdjustmentsPanel: View {
     // Binding to the main edited image
     @Binding var editedImage: UIImage
 
-    // Service to process the image
-    private let service = AdjustmentService()
+    // --- 1. ADD AI SERVICE & LOADING STATE ---
+    private let aiService = GeminiAIService()
+    private let adjustmentService = AdjustmentService()
+    @State private var isProcessingAI = false
+    // --- END ---
     
     // State to hold all slider values
     @State private var values = AdjustmentValues()
@@ -21,6 +24,25 @@ struct AdjustmentsPanel: View {
     
     var body: some View {
         VStack(spacing: 15) {
+            
+            // --- 2. ADD THE AI BUTTONS ---
+            HStack(spacing: 12) {
+                aiButton(title: "Auto Enhance", icon: "sparkles") {
+                    runAITask {
+                        await aiService.autoEnhanceImage(image: originalImage)
+                    }
+                }
+                aiButton(title: "AI Colorize", icon: "paintpalette") {
+                    runAITask {
+                        await aiService.colorizeImage(image: originalImage)
+                    }
+                }
+            }
+            .padding(.horizontal)
+            // --- END ---
+
+            Divider().padding(.horizontal)
+            
             // 1. The Main Slider
             adjustmentSlider
             
@@ -33,9 +55,54 @@ struct AdjustmentsPanel: View {
             // schedule an update (don't process every tiny move)
             scheduleImageUpdate()
         }
+        .disabled(isProcessingAI) // Disable sliders while AI is working
+        .overlay {
+            // Local loading spinner
+            if isProcessingAI {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.4).cornerRadius(8))
+            }
+        }
     }
     
-    /// 1. The main slider that changes based on the selected tool
+    /// Helper for the new AI buttons
+    private func aiButton(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Image(systemName: icon)
+                Text(title)
+            }
+            .font(.caption)
+            .fontWeight(.semibold)
+            .padding(10)
+            .frame(maxWidth: .infinity)
+            .background(Color.purple.opacity(0.2))
+            .foregroundColor(.purple)
+            .cornerRadius(8)
+        }
+    }
+    
+    /// Helper to run AI tasks and update the image
+    private func runAITask(task: @escaping () async -> Result<UIImage, GeminiAIService.AIError>) {
+        isProcessingAI = true
+        Task {
+            let result = await task()
+            switch result {
+            case .success(let newImage):
+                self.editedImage = newImage
+                // We've received a new base image, reset sliders
+                self.values = AdjustmentValues()
+            case .failure(let error):
+                print("AI task failed: \(error)")
+                // TODO: Show an error alert
+            }
+            isProcessingAI = false
+        }
+    }
+    
+    /// The main slider that changes based on the selected tool
     @ViewBuilder
     private var adjustmentSlider: some View {
         VStack {
@@ -63,7 +130,7 @@ struct AdjustmentsPanel: View {
         .padding(.horizontal)
     }
     
-    /// 2. The scrollable list of adjustment tools
+    /// The scrollable list of adjustment tools
     private var adjustmentList: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 20) {
@@ -150,7 +217,7 @@ struct AdjustmentsPanel: View {
     private func applyAdjustments() {
         // Run on background thread
         Task {
-            let finalImage = service.applyAdjustments(
+            let finalImage = adjustmentService.applyAdjustments(
                 to: originalImage, // Use the "base" image
                 values: values
             )
